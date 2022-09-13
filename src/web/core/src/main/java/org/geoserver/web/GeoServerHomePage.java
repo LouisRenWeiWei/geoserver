@@ -12,8 +12,11 @@ import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.logging.Level;
 import org.apache.commons.text.StringEscapeUtils;
 import org.apache.wicket.Component;
+import org.apache.wicket.Localizer;
 import org.apache.wicket.ajax.AjaxRequestTarget;
 import org.apache.wicket.ajax.form.AjaxFormComponentUpdatingBehavior;
 import org.apache.wicket.markup.html.basic.Label;
@@ -52,6 +55,7 @@ import org.geoserver.config.SettingsInfo;
 import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.security.AdminRequest;
 import org.geoserver.security.GeoServerSecurityManager;
+import org.geoserver.util.InternationalStringUtils;
 import org.geoserver.web.data.layer.LayerPage;
 import org.geoserver.web.data.layer.NewLayerPage;
 import org.geoserver.web.data.layer.PublishedChoiceRenderer;
@@ -64,6 +68,7 @@ import org.geoserver.web.data.workspace.WorkspacesModel;
 import org.geoserver.web.wicket.Select2DropDownChoice;
 import org.geotools.feature.NameImpl;
 import org.opengis.filter.Filter;
+import org.opengis.util.InternationalString;
 import org.springframework.security.core.Authentication;
 
 /**
@@ -270,37 +275,109 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
                     }
                 });
 
-        // add some contact info
-        contactURL = new ExternalLink("contactURL", contactInfo.getOnlineResource());
-        contactURL.add(new Label("contactName", contactInfo.getContactOrganization()));
+        Locale locale = getLocale();
+        this.contactURL = contactURL(contactInfo, locale);
+
         add(contactURL);
 
-        {
-            String version = String.valueOf(new ResourceModel("version").getObject());
-            String contactEmail = contactInfo.getContactEmail();
-
-            HashMap<String, String> params = new HashMap<>();
-            params.put("version", version);
-            params.put(
-                    "contactEmail",
-                    (contactEmail == null
-                            ? "geoserver@example.org"
-                            : StringEscapeUtils.escapeHtml4(contactEmail)));
-            Label label =
-                    new Label(
-                            "footerMessage",
-                            new StringResourceModel(
-                                    "GeoServerHomePage.footer",
-                                    this,
-                                    new Model<HashMap<String, String>>(params)));
-            footerMessage.setEscapeModelStrings(false);
-            add(footerMessage);
-        }
+        add(footerMessage(contactInfo, locale));
 
         if (isAdmin(auth)) {
             // show admin some additional details
-            Stopwatch sw = Stopwatch.createStarted();
-            Fragment f = new Fragment("catalogLinks", "catalogLinksFragment", this);
+            add(adminOverview());
+        } else {
+            // add catalogLinks placeholder (even when not admin) to identify this page location
+            add(placeholderLabel("catalogLinks"));
+        }
+
+        // additional content provided by plugins across the geoserver codebase
+        // for example security warnings to admin
+        add(additionalHomePageContent());
+
+        List<ServiceDescription> serviceDescriptions = new ArrayList<>();
+        List<ServiceLinkDescription> serviceLinks = new ArrayList<>();
+        for (ServiceDescriptionProvider provider :
+                getGeoServerApplication().getBeansOfType(ServiceDescriptionProvider.class)) {
+            serviceDescriptions.addAll(provider.getServices(workspaceInfo, layerInfo));
+            serviceLinks.addAll(provider.getServiceLinks(workspaceInfo, layerInfo));
+        }
+        add(new ServicesPanel("serviceList", serviceDescriptions, serviceLinks, isAdmin(auth)));
+
+        // service capabilities title only shown if needed
+        Localizer localizer = GeoServerApplication.get().getResourceSettings().getLocalizer();
+
+        final Label serviceCapabilitiesTitle =
+                new Label(
+                        "serviceCapabilities",
+                        localizer.getString("GeoServerHomePage.serviceCapabilities", this));
+
+        serviceCapabilitiesTitle.setVisible(false);
+        add(serviceCapabilitiesTitle);
+
+        final IModel<List<CapabilitiesHomePageLinkProvider>> capsProviders =
+                getContentProviders(CapabilitiesHomePageLinkProvider.class);
+
+        ListView<CapabilitiesHomePageLinkProvider> capsView =
+                new ListView<CapabilitiesHomePageLinkProvider>("providedCaps", capsProviders) {
+                    private static final long serialVersionUID = 1L;
+
+                    @Override
+                    protected void populateItem(ListItem<CapabilitiesHomePageLinkProvider> item) {
+                        CapabilitiesHomePageLinkProvider provider = item.getModelObject();
+                        Component capsList = null;
+                        if (!(provider instanceof ServiceDescriptionProvider)) {
+                            capsList = provider.getCapabilitiesComponent("capsList");
+                            if (capsList != null) {
+                                // provider has something to contirnute so service capabilities
+                                // heading required
+                                serviceCapabilitiesTitle.setVisible(true);
+                            }
+                        }
+                        if (capsList == null) {
+                            capsList = placeholderLabel("capsList");
+                        }
+                        item.add(capsList);
+                    }
+                };
+        add(capsView);
+    }
+
+    /**
+     * Additional content provided by plugins across the geoserver codebase for example security
+     * warnings to admin
+     *
+     * @return ListView processing {@link GeoServerHomePageContentProvider} components
+     */
+    private ListView<GeoServerHomePageContentProvider> additionalHomePageContent() {
+        final IModel<List<GeoServerHomePageContentProvider>> contentProviders =
+                getContentProviders(GeoServerHomePageContentProvider.class);
+
+        return new ListView<GeoServerHomePageContentProvider>(
+                "contributedContent", contentProviders) {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            protected void populateItem(ListItem<GeoServerHomePageContentProvider> item) {
+                GeoServerHomePageContentProvider provider = item.getModelObject();
+                Component extraContent = provider.getPageBodyComponent("contentList");
+                if (null == extraContent) {
+                    extraContent = placeholderLabel("contentList");
+                }
+                item.add(extraContent);
+            }
+        };
+    }
+
+    private Label placeholderLabel(String wicketId) {
+        Label placeHolder = new Label(wicketId);
+        placeHolder.setVisible(false);
+        return placeHolder;
+    }
+
+    private Fragment adminOverview() {
+        Stopwatch sw = Stopwatch.createStarted();
+        try {
+            Fragment catalogLinks = new Fragment("catalogLinks", "catalogLinksFragment", this);
             Catalog catalog = getCatalog();
 
             NumberFormat numberFormat = NumberFormat.getIntegerInstance(getLocale());
@@ -314,96 +391,91 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
             final int storesCount = catalog.count(StoreInfo.class, allStores);
             final int wsCount = catalog.count(WorkspaceInfo.class, allWorkspaces);
 
-            f.add(
+            catalogLinks.add(
                     new BookmarkablePageLink<LayerPage>("layersLink", LayerPage.class)
                             .add(new Label("nlayers", numberFormat.format(layerCount))));
-            f.add(new BookmarkablePageLink<NewLayerPage>("addLayerLink", NewLayerPage.class));
+            catalogLinks.add(
+                    new BookmarkablePageLink<NewLayerPage>("addLayerLink", NewLayerPage.class));
 
-            f.add(
+            catalogLinks.add(
                     new BookmarkablePageLink<StorePage>("storesLink", StorePage.class)
                             .add(new Label("nstores", numberFormat.format(storesCount))));
-            f.add(new BookmarkablePageLink<NewDataPage>("addStoreLink", NewDataPage.class));
+            catalogLinks.add(
+                    new BookmarkablePageLink<NewDataPage>("addStoreLink", NewDataPage.class));
 
-            f.add(
+            catalogLinks.add(
                     new BookmarkablePageLink<WorkspacePage>("workspacesLink", WorkspacePage.class)
                             .add(new Label("nworkspaces", numberFormat.format(wsCount))));
-            f.add(
+            catalogLinks.add(
                     new BookmarkablePageLink<WorkspaceNewPage>(
                             "addWorkspaceLink", WorkspaceNewPage.class));
-            add(f);
-
+            return catalogLinks;
+        } finally {
             sw.stop();
-        } else {
-            // add catalogLinks placeholder (even when not admin) to identify this page location
-            Label placeHolder = new Label("catalogLinks");
-            placeHolder.setVisible(false);
-            add(placeHolder);
+            if (LOGGER.isLoggable(Level.FINE)) {
+                LOGGER.fine(
+                        "Admin summary of catalog links took " + sw.elapsed().toMillis() + " ms");
+            }
         }
+    }
 
-        // additional content provided by plugins across the geoserver codebase
-        // for example security warnings to admin
-        final IModel<List<GeoServerHomePageContentProvider>> contentProviders =
-                getContentProviders(GeoServerHomePageContentProvider.class);
-        ListView<GeoServerHomePageContentProvider> contentView =
-                new ListView<GeoServerHomePageContentProvider>(
-                        "contributedContent", contentProviders) {
-                    private static final long serialVersionUID = 1L;
+    private Label footerMessage(ContactInfo contactInfo, Locale locale) {
+        String version = String.valueOf(new ResourceModel("version").getObject());
 
-                    @Override
-                    protected void populateItem(ListItem<GeoServerHomePageContentProvider> item) {
-                        GeoServerHomePageContentProvider provider = item.getModelObject();
-                        Component extraContent = provider.getPageBodyComponent("contentList");
-                        if (null == extraContent) {
-                            Label placeHolder = new Label("contentList");
-                            placeHolder.setVisible(false);
-                            extraContent = placeHolder;
-                        }
-                        item.add(extraContent);
-                    }
-                };
-        add(contentView);
+        InternationalString contactEmail =
+                InternationalStringUtils.growable(
+                        contactInfo.getInternationalContactEmail(),
+                        contactInfo.getContactEmail() == null
+                                ? "geoserver@example.org"
+                                : contactInfo.getContactEmail());
 
-        List<ServicesPanel.ServiceDescription> serviceDescriptions = new ArrayList<>();
-        List<ServicesPanel.ServiceLinkDescription> serviceLinks = new ArrayList<>();
-        for (ServiceDescriptionProvider provider :
-                getGeoServerApplication().getBeansOfType(ServiceDescriptionProvider.class)) {
-            serviceDescriptions.addAll(provider.getServices(workspaceInfo, layerInfo));
-            serviceLinks.addAll(provider.getServiceLinks(workspaceInfo, layerInfo));
-        }
-        if (!isAdmin(auth)) {
-            serviceDescriptions.removeIf(s -> s.getService().equals("rest"));
-            serviceLinks.removeIf(l -> l.getService().equals("rest"));
-        }
-        add(new ServicesPanel("serviceList", serviceDescriptions, serviceLinks));
+        HashMap<String, String> params = new HashMap<>();
+        params.put("version", version);
+        params.put("contactEmail", StringEscapeUtils.escapeHtml4(contactEmail.toString(locale)));
 
-        final IModel<List<CapabilitiesHomePageLinkProvider>> capsProviders =
-                getContentProviders(CapabilitiesHomePageLinkProvider.class);
+        Label footerMessage =
+                new Label(
+                        "footerMessage",
+                        new StringResourceModel(
+                                "GeoServerHomePage.footer",
+                                this,
+                                new Model<HashMap<String, String>>(params)));
+        footerMessage.setEscapeModelStrings(false);
+        return footerMessage;
+    }
 
-        ListView<CapabilitiesHomePageLinkProvider> capsView =
-                new ListView<CapabilitiesHomePageLinkProvider>("providedCaps", capsProviders) {
-                    private static final long serialVersionUID = 1L;
+    private ExternalLink contactURL(ContactInfo contactInfo, Locale locale) {
+        InternationalString onlineResource =
+                InternationalStringUtils.growable(
+                        contactInfo.getInternationalOnlineResource(),
+                        contactInfo.getOnlineResource());
+        InternationalString contactName =
+                InternationalStringUtils.growable(
+                        contactInfo.getInternationalContactOrganization(),
+                        contactInfo.getContactOrganization());
+        ExternalLink link = new ExternalLink("contactURL", onlineResource.toString(locale));
+        link.setEnabled(onlineResource.length() != 0);
 
-                    @Override
-                    protected void populateItem(ListItem<CapabilitiesHomePageLinkProvider> item) {
-                        CapabilitiesHomePageLinkProvider provider = item.getModelObject();
-                        Component capsList;
-                        if (provider instanceof ServiceDescriptionProvider) {
-                            Label placeHolder = new Label("contentList");
-                            placeHolder.setVisible(false);
-                            capsList = placeHolder;
-                        } else {
-                            capsList = provider.getCapabilitiesComponent("capsList");
-                            if (capsList == null) {
-                                Label placeHolder = new Label("contentList");
-                                placeHolder.setVisible(false);
-                                capsList = placeHolder;
-                            }
-                        }
-                        item.add(capsList);
-                    }
-                };
+        link.add(new Label("contactName", contactName.toString(locale)));
+        link.setVisible(contactName.length() != 0);
 
-        add(capsView);
+        return link;
+    }
+
+    public WorkspaceInfo getWorkspaceInfo() {
+        return workspaceInfo;
+    }
+
+    public void setWorkspaceInfo(WorkspaceInfo workspaceInfo) {
+        this.workspaceInfo = workspaceInfo;
+    }
+
+    public PublishedInfo getLayerInfo() {
+        return layerInfo;
+    }
+
+    public void setLayerInfo(PublishedInfo layerInfo) {
+        this.layerInfo = layerInfo;
     }
 
     private List<PublishedInfo> getLayerNames() {
@@ -524,10 +596,7 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
                         enabledLayerGroup,
                         advertisedLayerGroup);
         // Or filter for merging them
-        Filter orFilter = Predicates.or(layerFilter, layerGroupFilter);
-
-        // And between the new filter and the initial filter
-        return orFilter;
+        return Predicates.or(layerFilter, layerGroupFilter);
     }
 
     /**

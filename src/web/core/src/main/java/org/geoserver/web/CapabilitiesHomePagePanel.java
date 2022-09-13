@@ -18,7 +18,7 @@ import org.geotools.util.Version;
 
 /**
  * Default component for a {@link CapabilitiesHomePageLinkProvider} implementation to provide a list
- * of getcapabilities links discriminated by service name and version.
+ * of {@link CapsInfo} (GetCapabilities links discriminated by service name and version.)
  *
  * @author Gabriel Roldan
  */
@@ -29,6 +29,8 @@ public class CapabilitiesHomePagePanel extends Panel {
     /**
      * A complete reference to a GetCapabilities or other service description document acting as the
      * model object to this panel's ListView.
+     *
+     * @deprecated Please use {@link ServiceDescription} and {@link ServiceLinkDescription}
      */
     public static class CapsInfo implements Serializable {
 
@@ -74,6 +76,16 @@ public class CapabilitiesHomePagePanel extends Panel {
         public int hashCode() {
             return Objects.hash(service, version, capsLink);
         }
+
+        @Override
+        public String toString() {
+            final StringBuilder sb = new StringBuilder("CapsInfo{");
+            sb.append("service='").append(service).append('\'');
+            sb.append(", version=").append(version);
+            sb.append(", capsLink='").append(capsLink).append('\'');
+            sb.append('}');
+            return sb.toString();
+        }
     }
 
     /**
@@ -103,6 +115,7 @@ public class CapabilitiesHomePagePanel extends Panel {
 
                     @Override
                     protected void populateItem(ListItem<CapsInfo> captItem) {
+                        @SuppressWarnings("deprecation")
                         CapsInfo capsInfo = captItem.getModelObject();
 
                         Version version = capsInfo.getVersion();

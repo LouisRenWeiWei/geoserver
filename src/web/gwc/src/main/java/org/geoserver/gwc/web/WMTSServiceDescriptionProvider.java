@@ -6,23 +6,18 @@ package org.geoserver.gwc.web;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.wicket.util.string.Strings;
 import org.geoserver.catalog.Catalog;
-import org.geoserver.catalog.LayerInfo;
 import org.geoserver.catalog.PublishedInfo;
-import org.geoserver.catalog.ServiceResourceProvider;
 import org.geoserver.catalog.WorkspaceInfo;
 import org.geoserver.config.GeoServer;
 import org.geoserver.gwc.GWC;
 import org.geoserver.gwc.config.GWCConfig;
 import org.geoserver.gwc.wmts.WMTSInfo;
-import org.geoserver.platform.GeoServerExtensions;
-import org.geoserver.util.InternationalStringUtils;
 import org.geoserver.web.GeoServerApplication;
+import org.geoserver.web.ServiceDescription;
 import org.geoserver.web.ServiceDescriptionProvider;
-import org.geoserver.web.ServicesPanel;
+import org.geoserver.web.ServiceLinkDescription;
 import org.geotools.util.Version;
-import org.opengis.util.InternationalString;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 
 /** Provide description of GeoWebCache services for welcome page. */
@@ -57,51 +52,21 @@ public class WMTSServiceDescriptionProvider extends ServiceDescriptionProvider {
     }
 
     @Override
-    public List<ServicesPanel.ServiceDescription> getServices(
+    public List<ServiceDescription> getServices(
             WorkspaceInfo workspaceInfo, PublishedInfo layerInfo) {
 
-        List<ServicesPanel.ServiceDescription> descriptions = new ArrayList<>();
+        List<ServiceDescription> descriptions = new ArrayList<>();
         WMTSInfo info = info(workspaceInfo, layerInfo);
 
-        String serviceId = "wmts";
-        boolean available = info.isEnabled();
-        if (layerInfo instanceof LayerInfo) {
-            ServiceResourceProvider provider =
-                    GeoServerExtensions.bean(ServiceResourceProvider.class);
-            List<String> layerServices =
-                    provider.getServicesForResource(((LayerInfo) layerInfo).getResource());
-            available = layerServices.contains(serviceId.toUpperCase());
-        }
-
-        InternationalString title =
-                InternationalStringUtils.growable(
-                        info.getInternationalTitle(),
-                        Strings.isEmpty(info.getTitle())
-                                ? serviceId.toUpperCase()
-                                : info.getTitle());
-        InternationalString description =
-                InternationalStringUtils.growable(
-                        info.getInternationalAbstract(),
-                        Strings.isEmpty(info.getAbstract()) ? null : info.getAbstract());
-
-        ServicesPanel.ServiceDescription serviceDescription =
-                new ServicesPanel.ServiceDescription(
-                        serviceId.toLowerCase(),
-                        title,
-                        description,
-                        available,
-                        workspaceInfo != null ? workspaceInfo.getName() : null,
-                        layerInfo != null ? layerInfo.getName() : null);
-
-        descriptions.add(serviceDescription);
+        descriptions.add(description(info, workspaceInfo, layerInfo));
         return descriptions;
     }
 
     @Override
-    public List<ServicesPanel.ServiceLinkDescription> getServiceLinks(
+    public List<ServiceLinkDescription> getServiceLinks(
             WorkspaceInfo workspaceInfo, PublishedInfo layerInfo) {
 
-        List<ServicesPanel.ServiceLinkDescription> links = new ArrayList<>();
+        List<ServiceLinkDescription> links = new ArrayList<>();
         WMTSInfo info = info(workspaceInfo, layerInfo);
 
         final GeoServerApplication app = GeoServerApplication.get();
@@ -110,7 +75,7 @@ public class WMTSServiceDescriptionProvider extends ServiceDescriptionProvider {
         try {
             if (gwcConfig.isWMSCEnabled() && null != app.getBean("gwcServiceWMS")) {
                 links.add(
-                        new ServicesPanel.ServiceLinkDescription(
+                        new ServiceLinkDescription(
                                 "wmts",
                                 new Version("1.1.1"),
                                 "../gwc/service/wms?request=GetCapabilities&version=1.1.1&tiled=true",
@@ -125,7 +90,7 @@ public class WMTSServiceDescriptionProvider extends ServiceDescriptionProvider {
         try {
             if (info.isEnabled() && null != app.getBean("gwcServiceWMTS")) {
                 links.add(
-                        new ServicesPanel.ServiceLinkDescription(
+                        new ServiceLinkDescription(
                                 "wmts",
                                 new Version("1.1.1"),
                                 "../gwc/service/wmts?services=WMTS&version=1.1.1&request=GetCapabilities",
@@ -139,7 +104,7 @@ public class WMTSServiceDescriptionProvider extends ServiceDescriptionProvider {
         try {
             if (gwcConfig.isTMSEnabled() && null != app.getBean("gwcServiceTMS")) {
                 links.add(
-                        new ServicesPanel.ServiceLinkDescription(
+                        new ServiceLinkDescription(
                                 "wmts",
                                 new Version("1.0.0"),
                                 "../gwc/service/tms/1.0.0",

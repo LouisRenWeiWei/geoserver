@@ -7,7 +7,6 @@ package org.geoserver.web;
 
 import java.util.Arrays;
 import org.apache.wicket.markup.html.WebPage;
-import org.geoserver.web.CapabilitiesHomePagePanel.CapsInfo;
 import org.geotools.util.Version;
 import org.junit.Test;
 
@@ -24,12 +23,19 @@ public class CapabilitiesHomePagePanelTest extends GeoServerWicketTestSupport {
          */
     }
 
+    @SuppressWarnings("deprecation")
     @Test
     public void testCapabilitiesLinks() {
 
-        CapsInfo ci1 = new CapsInfo("FakeService1", new Version("1.0.0"), "../caps1_v1");
-        CapsInfo ci2 = new CapsInfo("FakeService1", new Version("1.1.0"), "../caps1_v2");
-        CapsInfo ci3 = new CapsInfo("FakeService2", new Version("1.1.0"), "../caps2");
+        org.geoserver.web.CapabilitiesHomePagePanel.CapsInfo ci1 =
+                new org.geoserver.web.CapabilitiesHomePagePanel.CapsInfo(
+                        "FakeService1", new Version("1.0.0"), "../caps1_v1");
+        org.geoserver.web.CapabilitiesHomePagePanel.CapsInfo ci2 =
+                new org.geoserver.web.CapabilitiesHomePagePanel.CapsInfo(
+                        "FakeService1", new Version("1.1.0"), "../caps1_v2");
+        org.geoserver.web.CapabilitiesHomePagePanel.CapsInfo ci3 =
+                new org.geoserver.web.CapabilitiesHomePagePanel.CapsInfo(
+                        "FakeService2", new Version("1.1.0"), "../caps2");
 
         CapabilitiesHomePagePanel panel =
                 new CapabilitiesHomePagePanel("capsList", Arrays.asList(ci1, ci2, ci3));

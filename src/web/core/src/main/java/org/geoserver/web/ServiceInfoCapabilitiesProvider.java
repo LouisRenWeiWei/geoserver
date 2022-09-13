@@ -13,7 +13,6 @@ import org.apache.wicket.Component;
 import org.geoserver.config.ServiceInfo;
 import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.platform.Service;
-import org.geoserver.web.CapabilitiesHomePagePanel.CapsInfo;
 
 /**
  * Contributes standard GetCapabilities links for all the versions in all the {@link ServiceInfo}
@@ -32,15 +31,16 @@ public class ServiceInfoCapabilitiesProvider implements CapabilitiesHomePageLink
         Set<String> skip = new HashSet<>();
         for (ServiceDescriptionProvider provider :
                 GeoServerExtensions.extensions(ServiceDescriptionProvider.class)) {
-            for (ServicesPanel.ServiceDescription service : provider.getServices(null, null)) {
+            for (ServiceDescription service : provider.getServices(null, null)) {
                 skip.add(service.getService());
             }
-            for (ServicesPanel.ServiceLinkDescription link : provider.getServiceLinks(null, null)) {
+            for (ServiceLinkDescription link : provider.getServiceLinks(null, null)) {
                 skip.add(link.getProtocol().toLowerCase());
             }
         }
-
-        List<CapsInfo> serviceInfoLinks = new ArrayList<>();
+        @SuppressWarnings("deprecation")
+        List<org.geoserver.web.CapabilitiesHomePagePanel.CapsInfo> serviceInfoLinks =
+                new ArrayList<>();
 
         for (Service service : GeoServerExtensions.extensions(Service.class)) {
             String serviceId = service.getId();
@@ -48,7 +48,10 @@ public class ServiceInfoCapabilitiesProvider implements CapabilitiesHomePageLink
                 continue;
             } else if (service.getCustomCapabilitiesLink() != null) {
                 String capsLink = service.getCustomCapabilitiesLink();
-                CapsInfo ci = new CapsInfo(serviceId, service.getVersion(), capsLink);
+                @SuppressWarnings("deprecation")
+                org.geoserver.web.CapabilitiesHomePagePanel.CapsInfo ci =
+                        new org.geoserver.web.CapabilitiesHomePagePanel.CapsInfo(
+                                serviceId, service.getVersion(), capsLink);
                 serviceInfoLinks.add(ci);
             } else if (service.getOperations().contains("GetCapabilities")) {
                 String capsLink =
@@ -57,9 +60,15 @@ public class ServiceInfoCapabilitiesProvider implements CapabilitiesHomePageLink
                                 + "&version="
                                 + service.getVersion().toString()
                                 + "&request=GetCapabilities";
-                CapsInfo ci = new CapsInfo(serviceId, service.getVersion(), capsLink);
+                @SuppressWarnings("deprecation")
+                org.geoserver.web.CapabilitiesHomePagePanel.CapsInfo ci =
+                        new org.geoserver.web.CapabilitiesHomePagePanel.CapsInfo(
+                                serviceId, service.getVersion(), capsLink);
                 serviceInfoLinks.add(ci);
             }
+        }
+        if (serviceInfoLinks.isEmpty()) {
+            return null;
         }
         return new CapabilitiesHomePagePanel(id, serviceInfoLinks);
     }

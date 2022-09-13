@@ -6,24 +6,20 @@
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
-import org.apache.wicket.util.string.Strings;
 import org.geoserver.catalog.Catalog;
-import org.geoserver.catalog.LayerInfo;
 import org.geoserver.catalog.PublishedInfo;
-import org.geoserver.catalog.ServiceResourceProvider;
 import org.geoserver.catalog.WorkspaceInfo;
 import org.geoserver.config.GeoServer;
 import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.platform.Service;
-import org.geoserver.util.InternationalStringUtils;
 import org.geoserver.wcs.WCSInfo;
 import org.geoserver.wcs.WebCoverageService100;
 import org.geoserver.wcs.WebCoverageService111;
 import org.geoserver.wcs2_0.WebCoverageService20;
+import org.geoserver.web.ServiceDescription;
 import org.geoserver.web.ServiceDescriptionProvider;
-import org.geoserver.web.ServicesPanel;
+import org.geoserver.web.ServiceLinkDescription;
 import org.geotools.util.logging.Logging;
-import org.opengis.util.InternationalString;
 
 /** Provide description of WMS services for welcome page. */
 public class WCSServiceDescriptionProvider extends ServiceDescriptionProvider {
@@ -57,48 +53,20 @@ public class WCSServiceDescriptionProvider extends ServiceDescriptionProvider {
     }
 
     @Override
-    public List<ServicesPanel.ServiceDescription> getServices(
+    public List<ServiceDescription> getServices(
             WorkspaceInfo workspaceInfo, PublishedInfo layerInfo) {
 
-        List<ServicesPanel.ServiceDescription> descriptions = new ArrayList<>();
+        List<ServiceDescription> descriptions = new ArrayList<>();
         WCSInfo info = info(workspaceInfo, layerInfo);
 
-        String serviceId = "wcs";
-        boolean available = info.isEnabled();
-        if (layerInfo instanceof LayerInfo) {
-            ServiceResourceProvider provider =
-                    GeoServerExtensions.bean(ServiceResourceProvider.class);
-            List<String> layerServices =
-                    provider.getServicesForResource(((LayerInfo) layerInfo).getResource());
-            available = layerServices.contains(serviceId.toUpperCase());
-        }
-
-        InternationalString title =
-                InternationalStringUtils.growable(
-                        info.getInternationalTitle(),
-                        Strings.isEmpty(info.getTitle())
-                                ? serviceId.toUpperCase()
-                                : info.getTitle());
-        InternationalString description =
-                InternationalStringUtils.growable(
-                        info.getInternationalAbstract(),
-                        Strings.isEmpty(info.getAbstract()) ? null : info.getAbstract());
-        ServicesPanel.ServiceDescription serviceDescription =
-                new ServicesPanel.ServiceDescription(
-                        serviceId.toLowerCase(),
-                        title,
-                        description,
-                        available,
-                        workspaceInfo != null ? workspaceInfo.getName() : null,
-                        layerInfo != null ? layerInfo.getName() : null);
-        descriptions.add(serviceDescription);
+        descriptions.add(description(info, workspaceInfo, layerInfo));
         return descriptions;
     }
 
     @Override
-    public List<ServicesPanel.ServiceLinkDescription> getServiceLinks(
+    public List<ServiceLinkDescription> getServiceLinks(
             WorkspaceInfo workspaceInfo, PublishedInfo layerInfo) {
-        List<ServicesPanel.ServiceLinkDescription> links = new ArrayList<>();
+        List<ServiceLinkDescription> links = new ArrayList<>();
         List<Service> extensions = GeoServerExtensions.extensions(Service.class);
 
         for (Service service : extensions) {
@@ -116,7 +84,7 @@ public class WCSServiceDescriptionProvider extends ServiceDescriptionProvider {
 
                 if (link != null) {
                     links.add(
-                            new ServicesPanel.ServiceLinkDescription(
+                            new ServiceLinkDescription(
                                     serviceId.toLowerCase(),
                                     service.getVersion(),
                                     link,

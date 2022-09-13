@@ -24,7 +24,8 @@ public interface CapabilitiesHomePageLinkProvider {
      * the list of Services and Protocols (such as GetCapabilities links).
      *
      * @param id the id of the returned component
-     * @return a component suitable to be contained by the home page list of getcapabilities links
+     * @return a component suitable to be contained by the home page list of getcapabilities links,
+     *     or {@code null} if not available.
      */
     public Component getCapabilitiesComponent(final String id);
 }

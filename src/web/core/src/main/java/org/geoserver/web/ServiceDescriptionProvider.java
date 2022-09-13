@@ -6,11 +6,16 @@ package org.geoserver.web;
 
 import java.util.Collections;
 import java.util.List;
+import org.apache.wicket.util.string.Strings;
+import org.geoserver.catalog.LayerInfo;
 import org.geoserver.catalog.PublishedInfo;
+import org.geoserver.catalog.ServiceResourceProvider;
 import org.geoserver.catalog.WorkspaceInfo;
+import org.geoserver.config.ServiceInfo;
+import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.platform.Service;
-import org.geoserver.web.ServicesPanel.ServiceDescription;
-import org.geoserver.web.ServicesPanel.ServiceLinkDescription;
+import org.geoserver.util.InternationalStringUtils;
+import org.opengis.util.InternationalString;
 
 /**
  * Contributes service description and link information for global, workspace and layer services.
@@ -21,14 +26,38 @@ import org.geoserver.web.ServicesPanel.ServiceLinkDescription;
 public abstract class ServiceDescriptionProvider {
 
     /**
-     * Provides service descriptions, optionally filtered by workspace and layer.
+     * Provides service descriptions, filtered by workspace and layer.
      *
-     * <p>Filtering is forgiving: provide the global services unless the workspace exactly matches;
-     * provide workspace services unless the layer exactly matches.
+     * <p>Service info precedence: <pl>
+     * <li>layer (LayerInfo), workspace (WorkspaceInfo): Description of virtual web service for
+     *     individual layer.
+     *
+     *     <p>Service info may be constructed on the fly from layer, with default values from
+     *     workspace service info (if defined), or global service info.
+     * <li>layer (LayerGroup), workspace (WorkspaceInfo): Description of virtual web service for
+     *     individual layer group.
+     *
+     *     <p>Service info may be constructed on the fly from layer group, with default values from
+     *     workspace service info (if defined), or global service info.
+     * <li>layer (LayerGroup), workspace (null): Description of virtual web service for global layer
+     *     group.
+     *
+     *     <p>Service info may be constructed on the fly from layer group, with default values from
+     *     global service info.
+     * <li>layer (null), workspace (WorkspaceInfo): Description of virtual web virtual service for
+     *     workspace.
+     *
+     *     <p>Service info from workspace service info (if defined), or global service info.
+     * <li>layer (null), workspace (null): Description of global web service.
+     *
+     *     <p>Service defined by global service info.
+     * </ol>
+     *
+     * >
      *
      * @param workspaceInfo Workspace context, or {@code null} for global
      * @param layerInfo Layer context, or {@code null} for all
-     * @return service descriptions, may be empty if none available.
+     * @return Service descriptions, may be empty if none available.
      */
     public List<ServiceDescription> getServices(
             WorkspaceInfo workspaceInfo, PublishedInfo layerInfo) {
@@ -48,6 +77,50 @@ public abstract class ServiceDescriptionProvider {
     public List<ServiceLinkDescription> getServiceLinks(
             WorkspaceInfo workspace, PublishedInfo layer) {
         return Collections.emptyList();
+    }
+
+    /**
+     * Generate ServiceDescription from provided ServiceInfo.
+     *
+     * <p>Subclasses may use when implementing {@link #getServices(WorkspaceInfo, PublishedInfo)}.
+     *
+     * @param info ServiceInfo
+     * @return ServiceDescription
+     */
+    protected ServiceDescription description(
+            ServiceInfo info, WorkspaceInfo workspaceInfo, PublishedInfo layerInfo) {
+
+        boolean available = info.isEnabled();
+
+        if (layerInfo instanceof LayerInfo) {
+            ServiceResourceProvider provider =
+                    GeoServerExtensions.bean(ServiceResourceProvider.class);
+            List<String> layerServices =
+                    provider.getServicesForResource(((LayerInfo) layerInfo).getResource());
+
+            available = layerServices.contains(info.getName().toUpperCase());
+        }
+
+        InternationalString title =
+                InternationalStringUtils.growable(
+                        info.getInternationalTitle(),
+                        Strings.isEmpty(info.getTitle())
+                                ? info.getName().toUpperCase()
+                                : info.getTitle());
+
+        InternationalString description =
+                InternationalStringUtils.growable(
+                        info.getInternationalAbstract(),
+                        Strings.isEmpty(info.getAbstract()) ? null : info.getAbstract());
+
+        return new ServiceDescription(
+                info.getName().toLowerCase(),
+                title,
+                description,
+                available,
+                false,
+                workspaceInfo != null ? workspaceInfo.getName() : null,
+                layerInfo != null ? layerInfo.getName() : null);
     }
 
     /**
