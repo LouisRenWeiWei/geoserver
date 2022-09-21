@@ -85,7 +85,7 @@ public class ServicesPanel extends Panel {
                 }
                 listItem.add(new ServiceLinkListView("links", links));
 
-                listItem.setVisible(service.isAvailable());
+                listItem.setVisible(service.isAvailable() && enabled);
             }
         }
 

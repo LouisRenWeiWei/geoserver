@@ -239,7 +239,7 @@ public class GeoServerBasePage extends WebPage implements IAjaxIndicatorAware {
 
         // logout form
         WebMarkupContainer loggedInAsForm = new WebMarkupContainer("loggedinasform");
-        loggedInAsForm.add(new Label("loggedInUsername", anonymous ? "Nobody" : user.getName()));
+        loggedInAsForm.add(new Label("loggedInUsername", GeoServerSession.get().getUsername()));
         loggedInAsForm.setVisible(!anonymous);
         add(loggedInAsForm);
 

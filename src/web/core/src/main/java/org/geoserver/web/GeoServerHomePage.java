@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.logging.Level;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.text.StringEscapeUtils;
 import org.apache.wicket.Component;
 import org.apache.wicket.Localizer;
@@ -24,7 +25,6 @@ import org.apache.wicket.markup.html.form.DropDownChoice;
 import org.apache.wicket.markup.html.form.Form;
 import org.apache.wicket.markup.html.form.SubmitLink;
 import org.apache.wicket.markup.html.link.BookmarkablePageLink;
-import org.apache.wicket.markup.html.link.ExternalLink;
 import org.apache.wicket.markup.html.list.ListItem;
 import org.apache.wicket.markup.html.list.ListView;
 import org.apache.wicket.markup.html.panel.Fragment;
@@ -59,12 +59,15 @@ import org.geoserver.util.InternationalStringUtils;
 import org.geoserver.web.data.layer.LayerPage;
 import org.geoserver.web.data.layer.NewLayerPage;
 import org.geoserver.web.data.layer.PublishedChoiceRenderer;
+import org.geoserver.web.data.layergroup.LayerGroupEditPage;
+import org.geoserver.web.data.layergroup.LayerGroupPage;
 import org.geoserver.web.data.store.NewDataPage;
 import org.geoserver.web.data.store.StorePage;
 import org.geoserver.web.data.workspace.WorkspaceChoiceNameRenderer;
 import org.geoserver.web.data.workspace.WorkspaceNewPage;
 import org.geoserver.web.data.workspace.WorkspacePage;
 import org.geoserver.web.data.workspace.WorkspacesModel;
+import org.geoserver.web.spring.security.GeoServerSession;
 import org.geoserver.web.wicket.Select2DropDownChoice;
 import org.geotools.feature.NameImpl;
 import org.opengis.filter.Filter;
@@ -94,9 +97,6 @@ import org.springframework.security.core.Authentication;
  */
 public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnlockablePage {
 
-    /** Display contact name linking to contact URL. */
-    private ExternalLink contactURL;
-
     /** Context workspace for displayed web services, or null for global services */
     private String workspace = null;
 
@@ -123,7 +123,9 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
         GeoServer gs = getGeoServer();
 
         Authentication auth = getSession().getAuthentication();
-        if (!isAdmin(auth)) {
+        boolean admin = isAdmin(auth);
+
+        if (!admin) {
             // clear admin request so it does not interfere with
             // catalogue access of workspaces and layers
             AdminRequest.abort();
@@ -276,13 +278,18 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
                 });
 
         Locale locale = getLocale();
-        this.contactURL = contactURL(contactInfo, locale);
 
-        add(contactURL);
+        String welcomeText = contactInfo.getWelcome();
+        Label welcomeMessage = new Label("welcome", welcomeText);
+        welcomeMessage.setVisible(StringUtils.isNotBlank(welcomeText));
+        add(welcomeMessage);
+
+        add(belongsTo(contactInfo, locale));
 
         add(footerMessage(contactInfo, locale));
+        add(footerContact(contactInfo, locale));
 
-        if (isAdmin(auth)) {
+        if (admin) {
             // show admin some additional details
             add(adminOverview());
         } else {
@@ -301,8 +308,12 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
             serviceDescriptions.addAll(provider.getServices(workspaceInfo, layerInfo));
             serviceLinks.addAll(provider.getServiceLinks(workspaceInfo, layerInfo));
         }
-        add(new ServicesPanel("serviceList", serviceDescriptions, serviceLinks, isAdmin(auth)));
-
+        ServicesPanel serviceList =
+                new ServicesPanel("serviceList", serviceDescriptions, serviceLinks, admin);
+        add(serviceList);
+        if (serviceDescriptions.isEmpty() && serviceLinks.isEmpty()) {
+            serviceList.setVisible(false);
+        }
         // service capabilities title only shown if needed
         Localizer localizer = GeoServerApplication.get().getResourceSettings().getLocalizer();
 
@@ -340,6 +351,93 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
                     }
                 };
         add(capsView);
+    }
+
+    @Override
+    protected String getDescription() {
+        Locale locale = getLocale();
+
+        Catalog catalog = getCatalog();
+
+        NumberFormat numberFormat = NumberFormat.getIntegerInstance(locale);
+        numberFormat.setGroupingUsed(true);
+
+        Filter allWorkspaces = acceptAll();
+        int layerCount = countLayerNames();
+        int workspaceCount = catalog.count(WorkspaceInfo.class, allWorkspaces);
+
+        String userName = GeoServerSession.get().getUsername();
+
+        HashMap<String, String> params = new HashMap<>();
+        params.put("workspaceCount", numberFormat.format(workspaceCount));
+        params.put("layerCount", numberFormat.format(layerCount));
+        params.put("user", userName);
+
+        boolean isGlobal = getGeoServer().getGlobal().isGlobalServices();
+
+        StringBuilder builder = new StringBuilder();
+
+        if (layerInfo != null && layerInfo instanceof LayerInfo) {
+            params.put("layerName", layerInfo.getName());
+            builder.append(
+                    new StringResourceModel(
+                                    "GeoServerHomePage.descriptionLayer",
+                                    this,
+                                    new Model<HashMap<String, String>>(params))
+                            .getString());
+        } else if (layerInfo != null && layerInfo instanceof LayerGroupInfo) {
+            params.put("layerName", layerInfo.getName());
+
+            LayerGroupInfo layerGroup = (LayerGroupInfo) layerInfo;
+            if (layerGroup.getMode() == LayerGroupInfo.Mode.OPAQUE_CONTAINER
+                    || layerGroup.getMode() == LayerGroupInfo.Mode.SINGLE) {
+                builder.append(
+                        new StringResourceModel(
+                                        "GeoServerHomePage.descriptionLayer",
+                                        this,
+                                        new Model<HashMap<String, String>>(params))
+                                .getString());
+            } else {
+                builder.append(
+                        new StringResourceModel(
+                                        "GeoServerHomePage.descriptionLayerGroup",
+                                        this,
+                                        new Model<HashMap<String, String>>(params))
+                                .getString());
+            }
+        } else if (workspaceInfo != null) {
+            params.put("workspaceName", workspaceInfo.getName());
+
+            builder.append(
+                    new StringResourceModel(
+                                    "GeoServerHomePage.descriptionWorkspace",
+                                    this,
+                                    new Model<HashMap<String, String>>(params))
+                            .getString());
+        } else if (isGlobal) {
+            builder.append(
+                    new StringResourceModel(
+                                    "GeoServerHomePage.descriptionGlobal",
+                                    this,
+                                    new Model<HashMap<String, String>>(params))
+                            .getString());
+        } else {
+            builder.append(
+                    new StringResourceModel(
+                                    "GeoServerHomePage.descriptionGlobalOff",
+                                    this,
+                                    new Model<HashMap<String, String>>(params))
+                            .getString());
+        }
+
+        builder.append(" ");
+        if (isGlobal) {
+            builder.append(new StringResourceModel("GeoServerHomePage.globalOn", this).getString());
+        } else {
+            builder.append(
+                    new StringResourceModel("GeoServerHomePage.globalOff", this).getString());
+        }
+        return builder.toString();
     }
 
     /**
@@ -383,19 +481,31 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
             NumberFormat numberFormat = NumberFormat.getIntegerInstance(getLocale());
             numberFormat.setGroupingUsed(true);
 
-            final Filter allLayers = acceptAll();
-            final Filter allStores = acceptAll();
-            final Filter allWorkspaces = acceptAll();
-
-            final int layerCount = catalog.count(LayerInfo.class, allLayers);
-            final int storesCount = catalog.count(StoreInfo.class, allStores);
-            final int wsCount = catalog.count(WorkspaceInfo.class, allWorkspaces);
+            Filter layerFilter = acceptAll();
+            Filter groupFilter = acceptAll();
+            Filter storeFilter = acceptAll();
+            Filter allWorkspaces = acceptAll();
+            if( workspaceInfo != null){
+                layerFilter = Predicates.equal("resource.namespace.prefix", workspaceInfo.getName());
+                groupFilter = Predicates.equal("workspace.name", workspaceInfo.getName());
+                storeFilter = groupFilter = Predicates.equal("workspace.name", workspaceInfo.getName());
+            }
+            int layerCount = catalog.count(LayerInfo.class, layerFilter);
+            int groupCount = catalog.count(LayerGroupInfo.class, groupFilter);
+            int storesCount = catalog.count(StoreInfo.class, storeFilter);
+            int wsCount = workspaceInfo != null ? 1 : catalog.count(WorkspaceInfo.class, allWorkspaces);
 
             catalogLinks.add(
                     new BookmarkablePageLink<LayerPage>("layersLink", LayerPage.class)
                             .add(new Label("nlayers", numberFormat.format(layerCount))));
             catalogLinks.add(
                     new BookmarkablePageLink<NewLayerPage>("addLayerLink", NewLayerPage.class));
+
+            catalogLinks.add(
+                    new BookmarkablePageLink<LayerGroupPage>("groupsLink", LayerGroupPage.class)
+                            .add(new Label("ngroups", numberFormat.format(groupCount))));
+            catalogLinks.add(
+                    new BookmarkablePageLink<LayerGroupEditPage>("addGroupLink", LayerGroupEditPage.class));
 
             catalogLinks.add(
                     new BookmarkablePageLink<StorePage>("storesLink", StorePage.class)
@@ -419,19 +529,50 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
         }
     }
 
+    /**
+     * Organization link to online resource, or placeholder if organization not provided.
+     *
+     * @param contactInfo
+     * @param locale
+     * @return organization link to online resource.
+     */
+    private Label belongsTo(ContactInfo contactInfo, Locale locale) {
+        InternationalString onlineResource =
+                InternationalStringUtils.growable(
+                        contactInfo.getInternationalOnlineResource(),
+                        InternationalStringUtils.firstNonBlank(
+                                contactInfo.getOnlineResource(),
+                                getGeoServer().getSettings().getOnlineResource()));
+
+        InternationalString organization =
+                InternationalStringUtils.growable(
+                        contactInfo.getInternationalContactOrganization(),
+                        contactInfo.getContactOrganization());
+
+        if (organization == null || onlineResource == null) {
+            return placeholderLabel("belongsTo");
+        }
+        HashMap<String, String> params = new HashMap<>();
+        params.put("organization", StringEscapeUtils.escapeHtml4(organization.toString(locale)));
+        params.put(
+                "onlineResource", StringEscapeUtils.escapeHtml4(onlineResource.toString(locale)));
+
+        Label belongsToMessage =
+                new Label(
+                        "belongsTo",
+                        new StringResourceModel(
+                                "GeoServerHomePage.belongsTo",
+                                this,
+                                new Model<HashMap<String, String>>(params)));
+        belongsToMessage.setEscapeModelStrings(false);
+        return belongsToMessage;
+    }
+
     private Label footerMessage(ContactInfo contactInfo, Locale locale) {
         String version = String.valueOf(new ResourceModel("version").getObject());
 
-        InternationalString contactEmail =
-                InternationalStringUtils.growable(
-                        contactInfo.getInternationalContactEmail(),
-                        contactInfo.getContactEmail() == null
-                                ? "geoserver@example.org"
-                                : contactInfo.getContactEmail());
-
         HashMap<String, String> params = new HashMap<>();
         params.put("version", version);
-        params.put("contactEmail", StringEscapeUtils.escapeHtml4(contactEmail.toString(locale)));
 
         Label footerMessage =
                 new Label(
@@ -440,26 +581,33 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
                                 "GeoServerHomePage.footer",
                                 this,
                                 new Model<HashMap<String, String>>(params)));
+
         footerMessage.setEscapeModelStrings(false);
         return footerMessage;
     }
 
-    private ExternalLink contactURL(ContactInfo contactInfo, Locale locale) {
-        InternationalString onlineResource =
+    private Label footerContact(ContactInfo contactInfo, Locale locale) {
+        InternationalString contactEmailText =
                 InternationalStringUtils.growable(
-                        contactInfo.getInternationalOnlineResource(),
-                        contactInfo.getOnlineResource());
-        InternationalString contactName =
-                InternationalStringUtils.growable(
-                        contactInfo.getInternationalContactOrganization(),
-                        contactInfo.getContactOrganization());
-        ExternalLink link = new ExternalLink("contactURL", onlineResource.toString(locale));
-        link.setEnabled(onlineResource.length() != 0);
+                        contactInfo.getInternationalContactEmail(), contactInfo.getContactEmail());
 
-        link.add(new Label("contactName", contactName.toString(locale)));
-        link.setVisible(contactName.length() != 0);
+        String contactEmail = contactEmailText.toString(locale);
 
-        return link;
+        if (Strings.isEmpty(contactEmail)) {
+            return placeholderLabel("footerContact");
+        }
+        HashMap<String, String> params = new HashMap<>();
+        params.put("contactEmail", StringEscapeUtils.escapeHtml4(contactEmail));
+        Label message =
+                new Label(
+                        "footerContact",
+                        new StringResourceModel(
+                                "GeoServerHomePage.footerContact",
+                                this,
+                                new Model<HashMap<String, String>>(params)));
+
+        message.setEscapeModelStrings(false);
+        return message;
     }
 
     public WorkspaceInfo getWorkspaceInfo() {
@@ -478,30 +626,38 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
         this.layerInfo = layerInfo;
     }
 
+    /**
+     * Count of PublishedInfo (ie layer or layergroup) taking the current workspace and global
+     * services into account.
+     *
+     * @return Count of addressable layers
+     */
+    private int countLayerNames() {
+        Catalog catalog = getCatalog();
+        String workspaceName = workspaceInfo != null ? workspaceInfo.getName() : null;
+
+        return catalog.count(PublishedInfo.class, getLayerFilter(workspaceName));
+    }
+
+    /**
+     * Layers, filtered by workspaceInfo prefix if available.
+     *
+     * Layers are listed sorted by prefix name order.
+     *
+     * @return layers, filtered by workspaceInfo prefix if available.
+     */
     private List<PublishedInfo> getLayerNames() {
         List<PublishedInfo> layers = new ArrayList<>();
         Catalog catalog = getCatalog();
-        if (this.workspaceInfo != null) {
-            String prefix = workspaceInfo.getName() + ":";
-            try (CloseableIterator<PublishedInfo> it =
-                    catalog.list(PublishedInfo.class, getFilter())) {
-                while (it.hasNext()) {
-                    PublishedInfo layer = it.next();
-                    String prefixedName = layer.prefixedName();
-                    if (prefixedName.startsWith(prefix)) {
-                        layers.add(layer);
-                    }
-                }
-            }
-        } else {
-            if (getGeoServer().getGlobal().isGlobalServices()) {
-                try (CloseableIterator<PublishedInfo> it =
-                        catalog.list(PublishedInfo.class, getFilter())) {
-                    while (it.hasNext()) {
-                        PublishedInfo layer = it.next();
-                        layers.add(layer);
-                    }
-                }
+
+        String worksapceName =
+                workspaceInfo != null ? workspaceInfo.getName() : null;
+
+        try (CloseableIterator<PublishedInfo> it =
+                    catalog.list(PublishedInfo.class, getLayerFilter(worksapceName))) {
+            while (it.hasNext()) {
+                PublishedInfo layer = it.next();
+                layers.add(layer);
             }
         }
         layers.sort((o1, o2) -> o1.prefixedName().compareTo(o2.prefixedName()));
@@ -567,34 +723,67 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
         }
     }
 
-    protected Filter getFilter() {
+    /**
+     * Predicate construct to efficently query catalog for PublishedInfo suitable for interaction.
+     *
+     * @param workspaceName Optional workspace name to limit search to a single workspace
+     * @return Filter for use with catalog.
+     */
+    protected Filter getLayerFilter(String workspaceName) {
+
         // need to get only advertised and enabled layers
         Filter isLayerInfo = Predicates.isInstanceOf(LayerInfo.class);
         Filter isLayerGroupInfo = Predicates.isInstanceOf(LayerGroupInfo.class);
+
 
         Filter enabledFilter = Predicates.equal("resource.enabled", true);
         Filter storeEnabledFilter = Predicates.equal("resource.store.enabled", true);
         Filter advertisedFilter = Predicates.equal("resource.advertised", true);
         Filter enabledLayerGroup = Predicates.equal("enabled", true);
         Filter advertisedLayerGroup = Predicates.equal("advertised", true);
+
         // return only layer groups that are not containers
-        Filter nonContainerGroup =
-                Predicates.or(
-                        Predicates.equal("mode", LayerGroupInfo.Mode.EO),
-                        Predicates.equal("mode", LayerGroupInfo.Mode.NAMED),
-                        Predicates.equal("mode", LayerGroupInfo.Mode.OPAQUE_CONTAINER),
-                        Predicates.equal("mode", LayerGroupInfo.Mode.SINGLE));
+//        Filter nonContainerGroup =
+//                Predicates.or(
+//                        Predicates.equal("mode", LayerGroupInfo.Mode.EO),
+//                        Predicates.equal("mode", LayerGroupInfo.Mode.NAMED),
+//                        Predicates.equal("mode", LayerGroupInfo.Mode.OPAQUE_CONTAINER),
+//                        Predicates.equal("mode", LayerGroupInfo.Mode.SINGLE));
 
         // Filter for the Layers
-        Filter layerFilter =
-                Predicates.and(isLayerInfo, enabledFilter, storeEnabledFilter, advertisedFilter);
+        Filter layerFilter;
+        if (workspaceName != null) {
+            Filter workspaceLayerFilter = Predicates.equal("resource.namespace.prefix", workspaceName);
+            layerFilter =
+                    Predicates.and(
+                            isLayerInfo, workspaceLayerFilter, enabledFilter, storeEnabledFilter, advertisedFilter);
+        }
+        else {
+            layerFilter =
+                    Predicates.and(
+                            isLayerInfo, enabledFilter, storeEnabledFilter, advertisedFilter);
+        }
+
         // Filter for the LayerGroups
-        Filter layerGroupFilter =
-                Predicates.and(
-                        isLayerGroupInfo,
-                        nonContainerGroup,
-                        enabledLayerGroup,
-                        advertisedLayerGroup);
+        Filter layerGroupFilter;
+        if (workspaceName != null) {
+            Filter workspaceLayerGroupFilter = Predicates.equal("workspace.name", workspaceName);
+            layerGroupFilter =
+                    Predicates.and(
+                            isLayerGroupInfo,
+                            workspaceLayerGroupFilter,
+//                            nonContainerGroup,
+                            enabledLayerGroup,
+                            advertisedLayerGroup);
+        }
+        else {
+            layerGroupFilter =
+                    Predicates.and(
+                            isLayerGroupInfo,
+//                            nonContainerGroup,
+                            enabledLayerGroup,
+                            advertisedLayerGroup);
+        }
         // Or filter for merging them
         return Predicates.or(layerFilter, layerGroupFilter);
     }
@@ -609,7 +798,7 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
     String toWorkspace(String workspaceName, String layerName) {
         if (!Strings.isEmpty(layerName)) {
             if (layerName.contains(":")) {
-                return layerName.substring(layerName.indexOf(":"));
+                return layerName.substring(0,layerName.indexOf(":"));
             } else {
                 return null;
             }

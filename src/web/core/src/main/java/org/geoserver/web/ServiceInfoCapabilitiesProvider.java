@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import org.apache.wicket.Component;
+import org.geoserver.config.GeoServer;
 import org.geoserver.config.ServiceInfo;
 import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.platform.Service;
@@ -27,7 +28,10 @@ public class ServiceInfoCapabilitiesProvider implements CapabilitiesHomePageLink
     /** @see org.geoserver.web.CapabilitiesHomePageLinkProvider#getCapabilitiesComponent */
     @Override
     public Component getCapabilitiesComponent(final String id) {
-
+        GeoServer gs = GeoServerApplication.get().getGeoServer();
+        if (!gs.getGlobal().isGlobalServices()) {
+            return null;
+        }
         Set<String> skip = new HashSet<>();
         for (ServiceDescriptionProvider provider :
                 GeoServerExtensions.extensions(ServiceDescriptionProvider.class)) {

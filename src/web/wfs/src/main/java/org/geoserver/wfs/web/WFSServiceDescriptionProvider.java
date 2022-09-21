@@ -58,8 +58,9 @@ public class WFSServiceDescriptionProvider extends ServiceDescriptionProvider {
         List<ServiceDescription> descriptions = new ArrayList<>();
 
         WFSInfo info = info(workspaceInfo, layerInfo);
-
-        descriptions.add(description(info, workspaceInfo, layerInfo));
+        if (workspaceInfo != null || geoserver.getGlobal().isGlobalServices()) {
+            descriptions.add(description(info, workspaceInfo, layerInfo));
+        }
         return descriptions;
     }
 
@@ -67,6 +68,11 @@ public class WFSServiceDescriptionProvider extends ServiceDescriptionProvider {
     public List<ServiceLinkDescription> getServiceLinks(
             WorkspaceInfo workspaceInfo, PublishedInfo layerInfo) {
         List<ServiceLinkDescription> links = new ArrayList<>();
+
+        if (workspaceInfo == null && !geoserver.getGlobal().isGlobalServices()) {
+            return links;
+        }
+
         List<Service> extensions = GeoServerExtensions.extensions(Service.class);
 
         for (Service service : extensions) {

@@ -58,7 +58,9 @@ public class WMTSServiceDescriptionProvider extends ServiceDescriptionProvider {
         List<ServiceDescription> descriptions = new ArrayList<>();
         WMTSInfo info = info(workspaceInfo, layerInfo);
 
-        descriptions.add(description(info, workspaceInfo, layerInfo));
+        if (workspaceInfo != null || geoserver.getGlobal().isGlobalServices()) {
+            descriptions.add(description(info, workspaceInfo, layerInfo));
+        }
         return descriptions;
     }
 
@@ -67,6 +69,11 @@ public class WMTSServiceDescriptionProvider extends ServiceDescriptionProvider {
             WorkspaceInfo workspaceInfo, PublishedInfo layerInfo) {
 
         List<ServiceLinkDescription> links = new ArrayList<>();
+
+        if (workspaceInfo == null && !geoserver.getGlobal().isGlobalServices()) {
+            return links;
+        }
+
         WMTSInfo info = info(workspaceInfo, layerInfo);
 
         final GeoServerApplication app = GeoServerApplication.get();
