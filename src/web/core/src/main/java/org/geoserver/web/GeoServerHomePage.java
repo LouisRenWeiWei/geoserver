@@ -21,7 +21,6 @@ import org.apache.wicket.Localizer;
 import org.apache.wicket.ajax.AjaxRequestTarget;
 import org.apache.wicket.ajax.form.AjaxFormComponentUpdatingBehavior;
 import org.apache.wicket.markup.html.basic.Label;
-import org.apache.wicket.markup.html.form.DropDownChoice;
 import org.apache.wicket.markup.html.form.Form;
 import org.apache.wicket.markup.html.form.SubmitLink;
 import org.apache.wicket.markup.html.link.BookmarkablePageLink;
@@ -97,17 +96,35 @@ import org.springframework.security.core.Authentication;
  */
 public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnlockablePage {
 
-    /** Context workspace for displayed web services, or null for global services */
+    /**
+     * Optional workspace context for displayed web services, or {@code null} for global services.
+     *
+     * <p>This field matches the page parameter and is used to populate the raw text input of the
+     * Select2DropDownChoice widget. This is used to lookup {@link #workspaceInfo} from the catalog.
+     */
     private String workspace = null;
 
-    /** Selected WorkspaceInfo */
+    /** Selected WorkspaceInfo used to filter page contents. */
     private WorkspaceInfo workspaceInfo;
 
-    /** Context layer / layergroup for displayed web services (optional) */
+    /**
+     * Control used to display/define {@link #workspace} (and by extension {@link #workspaceInfo}.
+     */
+    private Select2DropDownChoice<WorkspaceInfo> workspaceField;
+
+    /**
+     * Optional layer / layergroup context for displayed web services, or {@code null}.
+     *
+     * <p>Field initially populated by page parameter and matches the raw text input of the
+     * Select2DropDownChoice widget. Used to look up {@link #layerInfo} in the catalog.
+     */
     private String layer = null;
 
-    /** Selected LayerInfo or LayerGroupInfo */
+    /** Selected PublishedInfo (i.e. LayerInfo or LayerGroupInfo) used to filter page contents. */
     private PublishedInfo layerInfo = null;
+
+    /** Control used to display/define {@link #layer} (and by extension {@link #layerInfo}. */
+    private Select2DropDownChoice<PublishedInfo> layerField;
 
     public GeoServerHomePage() {
         homeInit();
@@ -124,52 +141,12 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
 
         Authentication auth = getSession().getAuthentication();
         boolean admin = isAdmin(auth);
-
         if (!admin) {
             // clear admin request so it does not interfere with
             // catalogue access of workspaces and layers
             AdminRequest.abort();
         }
-
-        if (getPageParameters() != null && !getPageParameters().isEmpty()) {
-            StringValue workspaceParam = getPageParameters().get("workspace");
-            if (workspaceParam == null
-                    || workspaceParam.isEmpty()
-                    || Strings.isEmpty(workspaceParam.toString())) {
-                this.workspace = null; // list global services
-            } else {
-                this.workspace = workspaceParam.toString();
-            }
-
-            StringValue layerParam = getPageParameters().get("layer");
-            if (layerParam == null
-                    || layerParam.isEmpty()
-                    || Strings.isEmpty(layerParam.toString())) {
-                this.layer = null; // for all services
-            } else {
-                this.layer = layerParam.toString();
-            }
-        }
-
-        if (this.workspace != null) {
-            if (this.workspaceInfo == null) {
-                this.workspaceInfo = gs.getCatalog().getWorkspaceByName(this.workspace);
-            }
-        }
-        if (this.layer != null) {
-            if (this.layerInfo == null) {
-                this.layerInfo = layerInfo(workspaceInfo, this.layer);
-            }
-            if (layerInfo != null) {
-                String prefixedName = layerInfo.prefixedName();
-                if (prefixedName != null && prefixedName.contains(":")) {
-                    String prefix = prefixedName.substring(0, prefixedName.indexOf(":"));
-                    if (this.workspace == null || !this.workspace.equals(prefix)) {
-                        workspaceInfo = getGeoServer().getCatalog().getWorkspaceByName(prefix);
-                    }
-                }
-            }
-        }
+        initFromPageParameters(getPageParameters());
 
         ContactInfo contactInfo = gs.getSettings().getContact();
         if (workspaceInfo != null) {
@@ -179,103 +156,8 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
             }
         }
 
-        Form<GeoServerHomePage> form = new Form<>("form");
-        SubmitLink refresh =
-                new SubmitLink("refresh") {
-                    @Override
-                    public void onSubmit() {
-                        setResponsePage(
-                                GeoServerHomePage.class,
-                                new PageParameters()
-                                        .set(
-                                                "workspace",
-                                                workspaceInfo != null
-                                                        ? workspaceInfo.getName()
-                                                        : null,
-                                                0,
-                                                INamedParameters.Type.QUERY_STRING)
-                                        .set(
-                                                "layer",
-                                                layerInfo != null ? layerInfo.getName() : null,
-                                                1,
-                                                INamedParameters.Type.QUERY_STRING));
-                    }
-                };
-        refresh.setVisible(false);
-        form.add(refresh);
-        form.setDefaultButton(refresh);
+        Form<GeoServerHomePage> form = selectionForm(false);
         add(form);
-
-        @SuppressWarnings("PMD.UseDiamondOperator") // java 8 compiler cannot infer type
-        final DropDownChoice<WorkspaceInfo> workspaceField =
-                new Select2DropDownChoice<>(
-                        "workspace",
-                        new PropertyModel<>(this, "workspaceInfo"),
-                        new WorkspacesModel(),
-                        new WorkspaceChoiceNameRenderer());
-        workspaceField.setNullValid(true);
-        workspaceField.setRequired(false);
-        form.add(workspaceField);
-
-        final DropDownChoice<PublishedInfo> layerField =
-                new Select2DropDownChoice<>(
-                        "layer",
-                        new PropertyModel<>(this, "layerInfo"),
-                        getLayerNames(),
-                        new PublishedChoiceRenderer());
-        layerField.setNullValid(true);
-        layerField.setRequired(false);
-        form.add(layerField);
-
-        workspaceField.add(
-                new AjaxFormComponentUpdatingBehavior("change") {
-                    private static final long serialVersionUID = 5871428962450362668L;
-
-                    @Override
-                    protected void onUpdate(AjaxRequestTarget target) {
-                        setResponsePage(
-                                GeoServerHomePage.class,
-                                new PageParameters()
-                                        .set(
-                                                "workspace",
-                                                workspaceField.getInput(),
-                                                0,
-                                                INamedParameters.Type.QUERY_STRING)
-                                        .set("layer", null, 1, INamedParameters.Type.QUERY_STRING));
-                    }
-                });
-
-        layerField.add(
-                new AjaxFormComponentUpdatingBehavior("change") {
-                    private static final long serialVersionUID = 5871428962450362669L;
-
-                    @Override
-                    protected void onUpdate(AjaxRequestTarget target) {
-                        String layerName = layerField.getInput();
-                        if (layerName == null && layerField.getModelObject() != null) {
-                            // No input selected, check model object displayed
-                            layerName = layerField.getModelObject().prefixedName();
-                        }
-                        String workspaceName = workspaceField.getInput();
-                        if (workspaceName == null && workspaceField.getModelObject() != null) {
-                            // No input selected, check model object displayed
-                            workspaceName = workspaceField.getModelObject().getName();
-                        }
-                        setResponsePage(
-                                GeoServerHomePage.class,
-                                new PageParameters()
-                                        .set(
-                                                "workspace",
-                                                toWorkspace(workspaceName, layerName),
-                                                0,
-                                                INamedParameters.Type.QUERY_STRING)
-                                        .set(
-                                                "layer",
-                                                toLayer(workspaceName, layerName),
-                                                1,
-                                                INamedParameters.Type.QUERY_STRING));
-                    }
-                });
 
         Locale locale = getLocale();
 
@@ -353,6 +235,309 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
         add(capsView);
     }
 
+    /**
+     * Select of global web services, or virtual web service (defined for workspace, or layer).
+     *
+     * <p>This method is used by the {@link #selectionForm(boolean)} controls to update the page
+     * parameters and refresh the page.
+     *
+     * @param workspaceName Workspace name typed in or selected by user, or {@code null} for global
+     *     services.
+     * @param layerName Layer name typed in or selected by user, or {@code null} for global or
+     *     workspaces services.
+     */
+    private void selectHomePage(String workspaceName, String layerName) {
+        String workspaceSelection = toWorkspace(workspaceName, layerName);
+        String layerSelection = toLayer(workspaceName, layerName);
+
+        PageParameters pageParams = new PageParameters();
+        if (workspaceSelection != null) {
+            pageParams.add("workspace", workspaceSelection, 0, INamedParameters.Type.QUERY_STRING);
+        }
+        if (layerSelection != null) {
+            pageParams.add("layer", layerSelection, 1, INamedParameters.Type.QUERY_STRING);
+        }
+        setResponsePage(GeoServerHomePage.class, pageParams);
+    }
+
+    /**
+     * Check {@link #workspaceField} selection and input to determine workspaceName.
+     *
+     * @return workspaceName, may be {@code null} if undefined.
+     */
+    private String getWorkspaceFieldText() {
+        if (workspaceField.getModelObject() != null) {
+            return workspaceField.getModelObject().getName();
+        }
+        if (workspaceField.hasRawInput()) {
+            String rawInput = workspaceField.getRawInput();
+            if (StringUtils.isNotBlank(rawInput)) {
+                return rawInput;
+            }
+        }
+        if (StringUtils.isNotBlank(workspaceField.getInput())) {
+            return workspaceField.getInput();
+        }
+        return null;
+    }
+
+    /**
+     * Check {@link #layerField} selection and input to determine layerName.
+     *
+     * @return layerName, may include prefix, may be {@code null} if undefined.
+     */
+    private String getLayerFieldText() {
+        if (layerField.getModelObject() != null) {
+            return layerField.getModelObject().prefixedName();
+        }
+        if (layerField.hasRawInput()) {
+            String rawInput = layerField.getRawInput();
+            if (StringUtils.isNotBlank(rawInput)) {
+                return rawInput;
+            }
+        }
+        if (StringUtils.isNotBlank(layerField.getInput())) {
+            return layerField.getInput();
+        }
+        return null;
+    }
+
+    /**
+     * Form for selection of global web services, or virtual web service (defined for workspace, or
+     * layer).
+     *
+     * @param ajax Configure Select2DropDownChoice to use AjaxFormComponentUpdatingBehavior, false
+     *     to round-trip selection changes back to component.
+     * @return form
+     */
+    private Form<GeoServerHomePage> selectionForm(final boolean ajax) {
+
+        Form<GeoServerHomePage> form = new Form<>("form");
+        SubmitLink refresh =
+                new SubmitLink("refresh") {
+                    @Override
+                    public void onSubmit() {
+                        String workspaceName = getWorkspaceFieldText();
+                        String layerName = getLayerFieldText();
+
+                        selectHomePage(workspaceName, layerName);
+                    }
+                };
+        refresh.setVisible(false);
+        form.add(refresh);
+        form.setDefaultButton(refresh);
+
+        this.workspaceField =
+                new Select2DropDownChoice<WorkspaceInfo>(
+                        "workspace",
+                        new PropertyModel<>(this, "workspaceInfo"),
+                        new WorkspacesModel(),
+                        new WorkspaceChoiceNameRenderer()) {
+
+                    @Override
+                    protected boolean wantOnSelectionChangedNotifications() {
+                        return !ajax;
+                    }
+
+                    @Override
+                    protected void onSelectionChanged(WorkspaceInfo newSelection) {
+                        super.onSelectionChanged(newSelection);
+                        if (!ajax) {
+                            String workspaceName = getWorkspaceFieldText();
+
+                            selectHomePage(workspaceName, null);
+                        }
+                    }
+                };
+        workspaceField.setNullValid(true);
+        workspaceField.setRequired(false);
+        if (ajax) {
+            workspaceField.add(
+                    new AjaxFormComponentUpdatingBehavior("change") {
+                        private static final long serialVersionUID = 5871428962450362668L;
+
+                        @Override
+                        protected void onUpdate(AjaxRequestTarget target) {
+                            String workspaceName = getWorkspaceFieldText();
+
+                            selectHomePage(workspaceName, null);
+                        }
+                    });
+        }
+
+        form.add(workspaceField);
+
+        this.layerField =
+                new Select2DropDownChoice<PublishedInfo>(
+                        "layer",
+                        new PropertyModel<>(this, "layerInfo"),
+                        getLayerNames(),
+                        new PublishedChoiceRenderer()) {
+
+                    @Override
+                    protected boolean wantOnSelectionChangedNotifications() {
+                        return !ajax;
+                    }
+
+                    @Override
+                    protected void onSelectionChanged(PublishedInfo newSelection) {
+                        super.onSelectionChanged(newSelection);
+                        if (!ajax) {
+                            if (newSelection != null) {
+                                String prefixed = newSelection.prefixedName();
+                                if (prefixed.contains(":")) {
+                                    String workspaceName =
+                                            prefixed.substring(prefixed.indexOf(":") + 1);
+                                    String layerName =
+                                            prefixed.substring(prefixed.indexOf(":") + 1);
+
+                                    selectHomePage(workspaceName, layerName);
+                                } else {
+                                    selectHomePage(null, prefixed);
+                                }
+                            } else {
+                                String workspaceName = getWorkspaceFieldText();
+                                String layerName = getLayerFieldText();
+
+                                selectHomePage(workspaceName, layerName);
+                            }
+                        }
+                    }
+                };
+        layerField.setNullValid(true);
+        layerField.setRequired(false);
+        if (ajax) {
+            layerField.add(
+                    new AjaxFormComponentUpdatingBehavior("change") {
+                        private static final long serialVersionUID = 5871428962450362669L;
+
+                        @Override
+                        protected void onUpdate(AjaxRequestTarget target) {
+                            String workspaceName = getWorkspaceFieldText();
+                            String layerName = getLayerFieldText();
+
+                            selectHomePage(workspaceName, layerName);
+                        }
+                    });
+        }
+        form.add(layerField);
+        return form;
+    }
+
+    private void initFromPageParameters(PageParameters pageParameters) {
+        if (pageParameters == null || pageParameters.isEmpty()) {
+            this.workspace = null;
+            this.workspaceInfo = null;
+            this.layer = null;
+            this.layerInfo = null;
+            return;
+        }
+        GeoServer gs = getGeoServer();
+
+        // Step 1: Update fields from both page parameters (as workspace may have been defined by a
+        // layer prefix)
+        StringValue workspaceParam = getPageParameters().get("workspace");
+        if (workspaceParam == null
+                || workspaceParam.isEmpty()
+                || Strings.isEmpty(workspaceParam.toString())) {
+            this.workspace = null;
+        } else {
+            this.workspace = workspaceParam.toString();
+        }
+
+        StringValue layerParam = getPageParameters().get("layer");
+        if (layerParam == null || layerParam.isEmpty() || Strings.isEmpty(layerParam.toString())) {
+            this.layer = null; // for all services
+        } else {
+            this.layer = toLayer(this.workspace, layerParam.toString());
+            this.workspace = toWorkspace(this.workspace, layerParam.toString());
+        }
+
+        // Step 2: Look up workspaceInfo and layerInfo in catalog
+        if (this.workspace != null) {
+            if (this.workspaceInfo != null && this.workspaceInfo.getName().equals(this.workspace)) {
+                // no need to look up a second time, unless refresh?
+                if (LOGGER.isLoggable(Level.FINE)) {
+                    LOGGER.fine(
+                            "Parameter workspace='"
+                                    + this.workspace
+                                    + "' home page previously configured for this workspace");
+                }
+            } else {
+                this.workspaceInfo = gs.getCatalog().getWorkspaceByName(this.workspace);
+                if (this.workspaceInfo == null) {
+                    if (LOGGER.isLoggable(Level.FINE)) {
+                        LOGGER.fine(
+                                "Parameter workspace='"
+                                        + this.workspace
+                                        + "' unable to locate a workspace of this name");
+                    }
+                } else {
+                    if (LOGGER.isLoggable(Level.FINE)) {
+                        LOGGER.fine(
+                                "Parameter workspace='"
+                                        + this.workspace
+                                        + "' located workspaceInfo used to filter page contents");
+                    }
+                }
+            }
+        } else {
+            this.workspaceInfo = null; // list global services
+            LOGGER.fine("Parameter workspace not supplied, list global services");
+        }
+
+        if (this.layer != null) {
+            if (this.layerInfo != null && this.layerInfo.getName().equals(this.layer)) {
+                if (LOGGER.isLoggable(Level.FINE)) {
+                    LOGGER.fine(
+                            "Parameter layer='"
+                                    + this.layer
+                                    + "' home page previously configured for this layer");
+                }
+            } else {
+                this.layerInfo = layerInfo(workspaceInfo, this.layer);
+                if (layerInfo != null) {
+                    // Step 3: Double check workspace matches layer
+                    String prefixedName = this.layerInfo.prefixedName();
+                    if (prefixedName != null && prefixedName.contains(":")) {
+                        String prefix = prefixedName.substring(0, prefixedName.indexOf(":"));
+                        if (this.workspace == null || !this.workspace.equals(prefix)) {
+                            this.workspace = prefix;
+                            LOGGER.fine(
+                                    "Parameter workspace='"
+                                            + this.workspace
+                                            + "' updated from found layer '"
+                                            + prefixedName
+                                            + "'");
+                            if (this.layerInfo instanceof LayerInfo) {
+                                this.workspaceInfo =
+                                        ((LayerInfo) layerInfo)
+                                                .getResource()
+                                                .getStore()
+                                                .getWorkspace();
+                            } else if (this.layerInfo instanceof LayerGroupInfo) {
+                                this.workspaceInfo = ((LayerGroupInfo) layerInfo).getWorkspace();
+                            }
+                            // workspaceInfo =
+                            // getGeoServer().getCatalog().getWorkspaceByName(prefix);
+                            if (LOGGER.isLoggable(Level.FINE)) {
+                                LOGGER.fine("Updated workspaceInfo used to filter page contents");
+                            }
+                        }
+                    }
+                } else {
+                    LOGGER.fine(
+                            "Parameter layer='"
+                                    + this.layer
+                                    + "' unable to locate a layer or layer group of this name");
+                }
+            }
+        } else {
+            this.layerInfo = null; // list global or workspace services
+            LOGGER.fine("Parameter layer not supplied, list global or workspace services");
+        }
+    }
+
     @Override
     protected String getDescription() {
         Locale locale = getLocale();
@@ -378,7 +563,7 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
         StringBuilder builder = new StringBuilder();
 
         if (layerInfo != null && layerInfo instanceof LayerInfo) {
-            params.put("layerName", layerInfo.getName());
+            params.put("layerName", layerInfo.prefixedName());
             builder.append(
                     new StringResourceModel(
                                     "GeoServerHomePage.descriptionLayer",
@@ -386,7 +571,7 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
                                     new Model<HashMap<String, String>>(params))
                             .getString());
         } else if (layerInfo != null && layerInfo instanceof LayerGroupInfo) {
-            params.put("layerName", layerInfo.getName());
+            params.put("layerName", layerInfo.prefixedName());
 
             LayerGroupInfo layerGroup = (LayerGroupInfo) layerInfo;
             if (layerGroup.getMode() == LayerGroupInfo.Mode.OPAQUE_CONTAINER
@@ -485,15 +670,18 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
             Filter groupFilter = acceptAll();
             Filter storeFilter = acceptAll();
             Filter allWorkspaces = acceptAll();
-            if( workspaceInfo != null){
-                layerFilter = Predicates.equal("resource.namespace.prefix", workspaceInfo.getName());
+            if (workspaceInfo != null) {
+                layerFilter =
+                        Predicates.equal("resource.namespace.prefix", workspaceInfo.getName());
                 groupFilter = Predicates.equal("workspace.name", workspaceInfo.getName());
-                storeFilter = groupFilter = Predicates.equal("workspace.name", workspaceInfo.getName());
+                storeFilter =
+                        groupFilter = Predicates.equal("workspace.name", workspaceInfo.getName());
             }
             int layerCount = catalog.count(LayerInfo.class, layerFilter);
             int groupCount = catalog.count(LayerGroupInfo.class, groupFilter);
             int storesCount = catalog.count(StoreInfo.class, storeFilter);
-            int wsCount = workspaceInfo != null ? 1 : catalog.count(WorkspaceInfo.class, allWorkspaces);
+            int wsCount =
+                    workspaceInfo != null ? 1 : catalog.count(WorkspaceInfo.class, allWorkspaces);
 
             catalogLinks.add(
                     new BookmarkablePageLink<LayerPage>("layersLink", LayerPage.class)
@@ -505,7 +693,8 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
                     new BookmarkablePageLink<LayerGroupPage>("groupsLink", LayerGroupPage.class)
                             .add(new Label("ngroups", numberFormat.format(groupCount))));
             catalogLinks.add(
-                    new BookmarkablePageLink<LayerGroupEditPage>("addGroupLink", LayerGroupEditPage.class));
+                    new BookmarkablePageLink<LayerGroupEditPage>(
+                            "addGroupLink", LayerGroupEditPage.class));
 
             catalogLinks.add(
                     new BookmarkablePageLink<StorePage>("storesLink", StorePage.class)
@@ -642,7 +831,7 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
     /**
      * Layers, filtered by workspaceInfo prefix if available.
      *
-     * Layers are listed sorted by prefix name order.
+     * <p>Layers are listed sorted by prefix name order.
      *
      * @return layers, filtered by workspaceInfo prefix if available.
      */
@@ -650,11 +839,10 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
         List<PublishedInfo> layers = new ArrayList<>();
         Catalog catalog = getCatalog();
 
-        String worksapceName =
-                workspaceInfo != null ? workspaceInfo.getName() : null;
+        String worksapceName = workspaceInfo != null ? workspaceInfo.getName() : null;
 
         try (CloseableIterator<PublishedInfo> it =
-                    catalog.list(PublishedInfo.class, getLayerFilter(worksapceName))) {
+                catalog.list(PublishedInfo.class, getLayerFilter(worksapceName))) {
             while (it.hasNext()) {
                 PublishedInfo layer = it.next();
                 layers.add(layer);
@@ -735,7 +923,6 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
         Filter isLayerInfo = Predicates.isInstanceOf(LayerInfo.class);
         Filter isLayerGroupInfo = Predicates.isInstanceOf(LayerGroupInfo.class);
 
-
         Filter enabledFilter = Predicates.equal("resource.enabled", true);
         Filter storeEnabledFilter = Predicates.equal("resource.store.enabled", true);
         Filter advertisedFilter = Predicates.equal("resource.advertised", true);
@@ -743,22 +930,26 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
         Filter advertisedLayerGroup = Predicates.equal("advertised", true);
 
         // return only layer groups that are not containers
-//        Filter nonContainerGroup =
-//                Predicates.or(
-//                        Predicates.equal("mode", LayerGroupInfo.Mode.EO),
-//                        Predicates.equal("mode", LayerGroupInfo.Mode.NAMED),
-//                        Predicates.equal("mode", LayerGroupInfo.Mode.OPAQUE_CONTAINER),
-//                        Predicates.equal("mode", LayerGroupInfo.Mode.SINGLE));
+        //        Filter nonContainerGroup =
+        //                Predicates.or(
+        //                        Predicates.equal("mode", LayerGroupInfo.Mode.EO),
+        //                        Predicates.equal("mode", LayerGroupInfo.Mode.NAMED),
+        //                        Predicates.equal("mode", LayerGroupInfo.Mode.OPAQUE_CONTAINER),
+        //                        Predicates.equal("mode", LayerGroupInfo.Mode.SINGLE));
 
         // Filter for the Layers
         Filter layerFilter;
         if (workspaceName != null) {
-            Filter workspaceLayerFilter = Predicates.equal("resource.namespace.prefix", workspaceName);
+            Filter workspaceLayerFilter =
+                    Predicates.equal("resource.namespace.prefix", workspaceName);
             layerFilter =
                     Predicates.and(
-                            isLayerInfo, workspaceLayerFilter, enabledFilter, storeEnabledFilter, advertisedFilter);
-        }
-        else {
+                            isLayerInfo,
+                            workspaceLayerFilter,
+                            enabledFilter,
+                            storeEnabledFilter,
+                            advertisedFilter);
+        } else {
             layerFilter =
                     Predicates.and(
                             isLayerInfo, enabledFilter, storeEnabledFilter, advertisedFilter);
@@ -772,15 +963,14 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
                     Predicates.and(
                             isLayerGroupInfo,
                             workspaceLayerGroupFilter,
-//                            nonContainerGroup,
+                            //                            nonContainerGroup,
                             enabledLayerGroup,
                             advertisedLayerGroup);
-        }
-        else {
+        } else {
             layerGroupFilter =
                     Predicates.and(
                             isLayerGroupInfo,
-//                            nonContainerGroup,
+                            //                            nonContainerGroup,
                             enabledLayerGroup,
                             advertisedLayerGroup);
         }
@@ -798,7 +988,7 @@ public class GeoServerHomePage extends GeoServerBasePage implements GeoServerUnl
     String toWorkspace(String workspaceName, String layerName) {
         if (!Strings.isEmpty(layerName)) {
             if (layerName.contains(":")) {
-                return layerName.substring(0,layerName.indexOf(":"));
+                return layerName.substring(0, layerName.indexOf(":"));
             } else {
                 return null;
             }
